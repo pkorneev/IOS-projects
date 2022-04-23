@@ -26,3 +26,13 @@ districts — vypíše statistiku nakažených osob pro jednotlivé okresy.
 
 regions — vypíše statistiku nakažených osob pro jednotlivé kraje.
 
+FILTERS může být kombinace následujících (každý maximálně jednou):
+
+-a DATETIME — after: jsou uvažovány pouze záznamy PO tomto datu (včetně tohoto data). DATETIME je formátu YYYY-MM-DD.
+
+-b DATETIME — before: jsou uvažovány pouze záznamy PŘED tímto datem (včetně tohoto data).
+
+-g GENDER — jsou uvažovány pouze záznamy nakažených osob daného pohlaví. GENDER může být M (muži) nebo Z (ženy).
+
+-s [WIDTH] u příkazů gender, age, daily, monthly, yearly, countries, districts a regions vypisuje data ne číselně, ale graficky v podobě histogramů.
+Nepovinný parametr WIDTH nastavuje šířku histogramů, tedy délku nejdelšího řádku, na WIDTH. Tedy, WIDTH musí být kladné celé číslo. Pokud není parametr WIDTH uveden, řídí se šířky řádků požadavky uvedenými níže.
