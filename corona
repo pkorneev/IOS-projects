@@ -1,0 +1,626 @@
+#!/bin/sh
+
+#---------------------------------|
+# VUT FIT 2021/2022 letni semestr |
+# IOS-1 project                   |
+# Pavlo Kornieiev xkorni03        |
+#---------------------------------|
+export POSIXLY_CORRECT=yes
+
+print_help()
+{
+echo "________________________________________________________________________________________________________________________________________________"
+echo "COMMAND can be one of:"
+echo ""
+echo "  infected - counts the number of infected."
+echo "  merge - merges several files with records into one, preserving the original order (the header will be output only once)."
+echo "  gender - lists the number of infected for each gender."
+echo "  age - lists statistics on the number of infected people by age (more detailed description is below)."
+echo "  daily - lists statistics of infected persons for individual days."
+echo "  monthly - lists statistics of infected persons for individual months."
+echo "  yearly - lists statistics on infected people for each year."
+echo "  countries - lists statistics of infected persons for individual countries of the disease (excluding the Czech Republic, ie the CZ code)."
+echo "  districts - lists statistics on infected persons for individual districts."
+echo "  regions - lists statistics of infected persons for individual regions."
+echo "________________________________________________________________________________________________________________________________________________"
+echo "FILTERS can be a combination of the following (each at most once):"
+echo ""
+echo "  -a DATETIME - after: only PO records on this date (including this date) are considered. DATETIME is in the format YYYY-MM-DD.
+  -b DATETIME - before: only records BEFORE this date (including this date) are considered."
+echo "  -g GENDER - only records of infected persons of a given sex are considered. GENDER can be M (men) or Z (women)."
+echo "  -s [WIDTH] for gender, age, daily, monthly, yearly, countries, districts, and regions commands lists data not numerically but graphically in the form of histograms.
+  The optional parameter WIDTH sets the width of the histograms, ie the length of the longest line, to WIDTH.
+  Thus, WIDTH must be a positive integer. If the WIDTH parameter is not specified, the line widths follow the requirements below."
+echo "  -h — vypíše nápovědu s krátkým popisem každého příkazu a přepínače."
+echo ""
+}
+
+FLAG_WIDTH="false"
+FLAG_A="false"
+FLAG_B="false"
+FLAG_DATE="false"
+GENDER_FLAG="false"
+DATE_CONTROL='^[0-9]{4}[-/](0[1-9]|1[0-2])[-/](0[1-9]|[1-2][0-9]|3[0-1])$'
+WIDTH_CONTROL='[0-9]\d*$'
+WIDTH=""
+
+#parcing arguments from cl
+while [ "$#" -gt 0 ];do
+  case "$1" in            
+    -h) 
+          print_help
+          exit 0
+          shift
+          ;;
+    -a)
+        DATE_A="$2"
+          FLAG_A="true"
+          FLAG_DATE="true"
+          if [[ $DATE_A =~ $DATE_CONTROL ]]; then
+            shift
+            shift
+          else
+            echo "ERROR: WRONG DATA FORMAT"
+            exit 1
+          fi
+          ;;
+    -b)
+        DATE_B="$2"
+          FLAG_B="true"
+          FLAG_DATE="true"
+          if [[ $DATE_A =~ $DATE_CONTROL ]]; then
+            shift
+            shift
+          else
+            echo "ERROR: WRONG DATA FORMAT"
+            exit 1
+          fi
+          ;;
+    -g) GENDER="$2"
+          GENDER_FLAG="true"
+          shift
+          shift
+          ;;           
+    -s) FLAG_WIDTH="true"
+        if [[ $2 =~ $WIDTH_CONTROL ]]; then
+          WIDTH="$2"
+          shift
+          shift
+        else
+          shift  
+        fi  
+          ;;
+    infected|merge|gender|age|daily|monthly|yearly|countries|districts|regions) 
+          COMMAND="$1"
+          shift
+          ;;     
+    *.csv) 
+         if [[ -e "$1" && -r "$1" ]]; then
+            CSV_FILES="$CSV_FILES $1"
+            shift
+        else
+            echo "ERROR: FILE IS NOT READABLE OR DOES NOT EXIST"
+            exit 1 
+         fi 
+            ;;   
+    *.gz)
+        if [[ -e "$1" && -r "$1" ]]; then
+            GZ_CSV_FILES="$GZ_CSV_FILES $1"
+            shift
+        else
+            echo "ERROR: FILE IS NOT READABLE OR DOES NOT EXIST"
+            exit 1 
+        fi 
+            ;;
+    *.bz2)
+        if [[ -e "$1" && -r "$1" ]]; then
+            BZ_CSV_FILES="$BZ_CSV_FILES $1"
+            shift
+        else
+            echo "ERROR: FILE IS NOT READABLE OR DOES NOT EXIST"
+            exit 1 
+        fi 
+            ;;                   
+    *) 
+         echo "UNKNOWN COMMAND, OR WRONG ARGS"
+         echo "TRY -h FOR USAGE"    
+          exit 0            
+          ;;  
+  esac
+done
+
+
+#save input to var
+if [[ -n "$GZ_CSV_FILES" && -n "$CSV_FILES" && -n "$BZ_CSV_FILES" ]]; then 
+    READ_INPUT="gzip -d -c $GZ_CSV_FILES | bzip2 -dc < $BZ_CSV_FILES | cat $CSV_FILES -"
+
+elif [[ -n "$GZ_CSV_FILES" && -n "$CSV_FILES" && -z "$BZ_CSV_FILES" ]]; then  
+    READ_INPUT="gzip -d -c $GZ_CSV_FILES | cat $CSV_FILES -"
+
+elif [[ -n "$GZ_CSV_FILES" && -z "$CSV_FILES" && -n "$BZ_CSV_FILES" ]]; then
+    READ_INPUT="gzip -d -c $GZ_CSV_FILES | bzip2 -dc < $BZ_CSV_FILES | cat -"
+
+elif [[ -n "$GZ_CSV_FILES" && -z "$CSV_FILES" && -z "$BZ_CSV_FILES" ]]; then
+    READ_INPUT="gzip -d -c $GZ_CSV_FILES | cat -"
+
+elif [[ -z "$GZ_CSV_FILES" && -n "$CSV_FILES" && -n "$BZ_CSV_FILES" ]]; then
+    READ_INPUT="bzip2 -dc < $BZ_CSV_FILES | cat $CSV_FILES -"
+
+elif [[ -z "$GZ_CSV_FILES" && -n "$CSV_FILES" && -z "$BZ_CSV_FILES" ]]; then
+    READ_INPUT="cat $CSV_FILES"
+
+elif [[ -z "$GZ_CSV_FILES" && -z "$CSV_FILES" && -n "$BZ_CSV_FILES" ]]; then
+    READ_INPUT="bzip2 -dc < $BZ_CSV_FILES | cat -"
+
+elif [[ -z "$GZ_CSV_FILES" && -z "$CSV_FILES" && -z "$BZ_CSV_FILES" ]]; then
+    READ_INPUT="cat -"                
+fi
+
+#HLAVICKA="id,datum,vek,pohlavi,kraj_nuts_kod,okres_lau_kod,nakaza_v_zahranici,nakaza_zeme_csu_kod,reportovano_khs"
+
+#filter by gender ( M for men and W for women )
+if [ "$GENDER_FLAG" = "true" ]; then
+  FILTER_GENDER="awk -F \",\" -v z=\"\$GENDER\" \
+   '{if(\$4 == z) print \$0} '"
+fi
+
+#date filter for both -a -b
+if [ "$FLAG_A" = "true" ] && [ "$FLAG_B" = "true" ]; then
+FILTER_DATE="awk -F \",\" -v z=\"\$DATE_A\" -v x=\"\$DATE_B\" '{if ((\$2 <= x) && (\$2 >= z))  print \$0 }'"
+FLAG_A="false"
+FLAG_B="false"
+fi
+
+#process date filter -a
+if [ "$FLAG_A" = "true" ]; then 
+  FILTER_DATE="awk -F \",\" -v z=\"\$DATE_A\" '{if(\$2 >= z) print \$0}'" 
+fi
+#process dare filter -b 
+if [ "$FLAG_B" = "true" ]; then
+  FILTER_DATE="awk -F \",\" -v z=\"\$DATE_B\" '{if(\$2 <= z) print \$0}'" 
+fi
+
+#store filtered input in variable
+if [ "$GENDER_FLAG" = "true" ] && [ "$FLAG_DATE" = "true" ]; then 
+  FILTERED_INPUT='eval "$READ_INPUT" \
+	  | eval "$FILTER_GENDER" \
+	  | eval "$FILTER_DATE"'
+elif [ "$GENDER_FLAG" = "true" ] && [ "$FLAG_DATE" = "false" ];then
+  FILTERED_INPUT='eval "$READ_INPUT" \
+	  | eval "$FILTER_GENDER"'
+elif [ "$GENDER_FLAG" = "false" ] && [ "$FLAG_DATE" = "true" ];then  
+  FILTERED_INPUT='eval "$READ_INPUT" \
+	  | eval "$FILTER_DATE"'
+elif [ "$GENDER_FLAG" = "false" ] && [ "$FLAG_DATE" = "false" ];then 
+FILTERED_INPUT="eval $READ_INPUT" 
+fi
+
+	
+if [ "$FLAG_WIDTH" = "true" ]; then
+  case "$COMMAND" in
+		"")
+
+			eval "$FILTERED_INPUT"
+			;;
+
+    merge)
+			eval "$FILTERED_INPUT"
+			;;  
+
+    infected)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '
+        BEGIN {people = 0}
+        {
+          if($4 == "M")
+            people++
+          else if($4 == "Z")
+            people++  
+        }
+        END {printf("%d\n",people)}'
+      ;;
+
+    gender) 
+      eval "$FILTERED_INPUT" \
+      | awk -F "," -v WIDTH="$WIDTH" '
+        BEGIN {m = 0 ; z = 0}
+        {
+          if($4 == "M")
+            m++
+          else if($4 == "Z")
+            z++
+        } 
+        END{
+          if(WIDTH!=""){
+            if(z>m){
+              printf("M: ");
+              m=(WIDTH*m)/z -1;
+              for(i=0;i<m;++i){
+                printf("#");
+              }
+              printf("\n");
+              printf("Z: ");
+              z=WIDTH;
+              for(j=0;j<z;++j){
+                printf("#");
+               } 
+              printf("\n"); 
+            }
+            else if(m>z){
+              printf("M: ");
+              z=(WIDTH*z)/m -1;
+              m=WIDTH;
+              for(i=0;i<m;++i){
+                printf("#");
+              }
+              printf("\n");
+              printf("Z: ");
+              for(j=0;j<z;++j){
+                printf("#");
+               } 
+              printf("\n"); 
+            }
+          }
+          else if(WIDTH==""){
+            m=(m/100000)-1;
+            z=(z/100000)-1; 
+            printf("M: ");
+            for(i=0;i<m;++i){
+              printf("#");
+            }
+            printf("\n");
+            printf("Z: ");
+            for(j=0;j<z;++j){
+              printf("#");
+            } 
+            printf("\n"); 
+          }  
+        }' 
+        
+      ;;
+    age) 
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '
+        BEGIN {zf = 0; sften = 0; sf = 0; stf = 0; tff = 0; fff = 0; fsf = 0; ssf = 0; sef = 0; enf = 0; nof = 0; of = 0; none = 0}
+        {
+          if($3 >= 0 && $3 <= 5)
+            zf++
+          else if($3 >= 6 && $3 <= 15)
+            sften++ 
+          else if($3 >= 16 && $3 <= 25)
+            sf++ 
+          else if($3 >= 26 && $3 <= 35)
+            stf++ 
+          else if($3 >= 36 && $3 <= 45)
+            tff++ 
+          else if($3 >= 46 && $3 <= 55)
+            fff++ 
+          else if($3 >= 56 && $3 <= 65)
+            fsf++ 
+          else if($3 >= 66 && $3 <= 75)
+            ssf++ 
+          else if($3 >= 76 && $3 <= 85)
+            sef++ 
+          else if($3 >= 86 && $3 <= 95)
+            enf++ 
+          else if($3 >= 96 && $3 <= 105)
+            nof++ 
+          else if($3 > 105 && $3 != "vek")
+            of++ 
+          else if($3 != "vek")
+            none++                          
+        } 
+        END {printf("0-5   : %d\n6-15  : %d\n16-25 : %d\n26-35 : %d\n36-45 : %d\n46-55 : %d\n56-65 : %d\n66-75 : %d\n76-85 : %d\n86-95 : %d\n96-105: %d\n>105  : %d\nNone  : %d\n",zf,sften,sf,stf,tff,fff,fsf,ssf,sef,enf,nof,of,none)}' 
+      ;;
+
+    regions)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '  
+      {
+        if($5 != "kraj_nuts_kod") \
+          if($5 != "")\
+            Code[$5]++;
+          else if ($5 == "")\
+            none_cnt[$5]++;   
+      }\
+      END{\
+        for (var in Code){
+          printf("%s: ",var)
+          for(i=0;i<Code[var]/10000 -1;i++){
+            printf("#")
+          }
+          printf("\n")
+        }
+        for (var in none_cnt)
+          printf("None: ")
+          for(i=j0;j<none_cnt[var]/10000 -1;j++){
+            printf("#")
+          }  
+      }
+      '  | sort 
+      ;;
+
+    districts)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '  
+      {\
+       if($6 != "okres_lau_kod") \
+          if($6 != "")\
+            Code[$6]++;\
+          else if ($6 == "")\
+            none_cnt[$6]++;
+      } \
+      END{\
+        for (var in Code){
+          printf("%s: ",var)
+          for(i=0;i<Code[var]/1000 -1;i++){
+            printf("#")
+          }
+          printf("\n")
+        }
+        for (var in none_cnt)
+          printf("None: ")
+          for(i=j0;j<none_cnt[var]/1000 -1;j++){
+            printf("#")
+          }  
+      }
+      ' | sort
+      ;;
+
+    countries)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '  
+      {\
+       if($8 != "nakaza_zeme_csu_kod") \
+          if($8 != "")\
+            if($8 != "CZ")\
+              Code[$8]++;\
+      } \
+      END{\
+        for (var in Code){
+          printf("%s: ",var)
+          for(i=0;i<Code[var]/100 -1;i++){
+            printf("#")
+          }
+          printf("\n")
+        }
+      }   
+      ' | sort
+      ;;
+
+    daily)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '  
+      {\
+       if($2 != "datum") \
+          if($2 != "")\
+              Code[$2]++;\
+      } \
+      END{\
+        for (var in Code){
+          printf("%s: ",var)
+          for(i=0;i<Code[var]/500 -1;i++){
+            printf("#")
+          }
+          printf("\n")
+        }
+      }
+      ' | sort  
+      ;;
+      
+    yearly)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '{print $2}' \
+      | awk -F "-" '  
+      {\
+        if ($1 != "")
+          if ($1 != "datum")
+            Code[$1]++;       
+      }\
+      END{\
+        for (var in Code){
+          printf("%s: ",var)
+          for(i=0;i<Code[var]/100000 -1;i++){
+            printf("#")
+          }
+          printf("\n")
+        }
+      }\
+      ' | sort \
+      ;;
+
+    monthly)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '{print $2}' \
+      | awk -F "-" '  
+      {\
+        if ($1 != "" && $2 != "")
+          if ($1 != "datum")
+            Code[$1"-"$2]++;       
+      }\
+        END{\
+        for (var in Code){
+          printf("%s: ",var)
+          for(i=0;i<Code[var]/10000 -1;i++){
+            printf("#")
+          }
+          printf("\n")
+        }
+      }
+      ' | sort 
+      ;;   
+  esac
+else
+  case "$COMMAND" in
+		"")
+
+			eval "$FILTERED_INPUT"
+			;;
+
+    merge)
+			eval "$FILTERED_INPUT"
+			;;  
+
+    infected)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '
+        BEGIN {people = 0}
+        {
+          if($4 == "M")
+            people++
+          else if($4 == "Z")
+            people++  
+        }
+        END {printf("%d\n",people)}'
+      ;;
+
+    gender) 
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '
+        BEGIN {m = 0 ; z = 0}
+        {
+          if($4 == "M")
+            m++
+          else if($4 == "Z")
+            z++
+        }
+        END {printf("M: %d\nZ: %d\n",m,z)}'
+      ;;
+
+    age) 
+      eval "$FILTERED_INPUT" \
+      | awk -F "," ' 
+        BEGIN {zf = 0; sften = 0; sf = 0; stf = 0; tff = 0; fff = 0; fsf = 0; ssf = 0; sef = 0; enf = 0; nof = 0; of = 0; none = 0}
+        {
+          if($3 >= 0 && $3 <= 5)
+            zf++
+          else if($3 >= 6 && $3 <= 15)
+            sften++ 
+          else if($3 >= 16 && $3 <= 25)
+            sf++ 
+          else if($3 >= 26 && $3 <= 35)
+            stf++ 
+          else if($3 >= 36 && $3 <= 45)
+            tff++ 
+          else if($3 >= 46 && $3 <= 55)
+            fff++ 
+          else if($3 >= 56 && $3 <= 65)
+            fsf++ 
+          else if($3 >= 66 && $3 <= 75)
+            ssf++ 
+          else if($3 >= 76 && $3 <= 85)
+            sef++ 
+          else if($3 >= 86 && $3 <= 95)
+            enf++ 
+          else if($3 >= 96 && $3 <= 105)
+            nof++ 
+          else if($3 > 105 && $3 != "vek")
+            of++ 
+          else if($3 != "vek")
+            none++                          
+        } 
+        END {printf("0-5   : %d\n6-15  : %d\n16-25 : %d\n26-35 : %d\n36-45 : %d\n46-55 : %d\n56-65 : %d\n66-75 : %d\n76-85 : %d\n86-95 : %d\n96-105: %d\n>105  : %d\nNone  : %d\n",zf,sften,sf,stf,tff,fff,fsf,ssf,sef,enf,nof,of,none)}'
+      ;;
+
+    regions)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '  
+      {
+        if($5 != "kraj_nuts_kod") \
+          if($5 != "")\
+            Code[$5]++;
+          else if ($5 == "")\
+            none_cnt[$5]++;   
+      }\
+      END{\
+        for (var in Code)\
+          print var":", Code[var]s
+        for (var in none_cnt)\
+          print "None:", none_cnt[var]    
+      } 
+      ' | sort 
+      ;;
+
+    districts)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '  
+      {\
+       if($6 != "okres_lau_kod") \
+          if($6 != "")\
+            Code[$6]++;\
+          else if ($6 == "")\
+            none_cnt[$6]++;
+      } \
+      END{\
+        for (var in Code)\
+          print var":", Code[var]
+        for (var in none_cnt)\
+          print "None:", none_cnt[var]  
+      }
+      ' | sort
+      ;;
+
+    countries)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '  
+      {\
+       if($8 != "nakaza_zeme_csu_kod") \
+          if($8 != "")\
+            if($8 != "CZ")\
+              Code[$8]++;\
+      } \
+      END{\
+        for (var in Code)\
+        print var":", Code[var]\
+      }\
+      ' | sort
+      ;;
+
+    daily)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '  
+      {\
+       if($2 != "datum") \
+          if($2 != "")\
+              Code[$2]++;\
+      } \
+      END{\
+        for (var in Code)\
+        print var":", Code[var]\
+      }\
+      ' | sort  
+      ;;
+      
+    yearly)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '{print $2}' \
+      | awk -F "-" '  
+      {\
+        if ($1 != "")
+          if ($1 != "datum")
+            Code[$1]++;       
+      }\
+      END{\
+        for (var in Code)\
+        print var":", Code[var]\
+      }\
+      ' | sort 
+      ;;
+
+    monthly)
+      eval "$FILTERED_INPUT" \
+      | awk -F "," '{print $2}' \
+      | awk -F "-" '  
+      {\
+        if ($1 != "" && $2 != "")
+          if ($1 != "datum")
+            Code[$1"-"$2]++;       
+      }\
+      END{\
+        for (var in Code)\
+        print var":", Code[var]\
+      }\
+      ' | sort 
+      ;;
+  esac      
+fi      
