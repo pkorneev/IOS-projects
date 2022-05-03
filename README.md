@@ -1,4 +1,4 @@
-# IOS-projects
+# IOS-project
 
 # POUŽITÍ
 corona [-h] [FILTERS] [COMMAND] [LOG [LOG2 [...]]
